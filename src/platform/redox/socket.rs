@@ -1055,6 +1055,17 @@ impl PalSocket for Sys {
             }
         }
 
+        if level == crate::header::netinet_in::IPPROTO_TCP as c_int {
+            let metadata = [SocketCall::SetSockOpt as u64, level as u64, option_name as u64];
+            redox_rt::sys::sys_call_wo(
+                socket as usize,
+                option_value,
+                CallFlags::empty(),
+                &metadata,
+            )?;
+            return Ok(());
+        }
+
         todo_skip!(
             0,
             "setsockopt({}, {}, {}, {:?}) - unknown option",
