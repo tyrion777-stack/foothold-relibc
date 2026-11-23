@@ -938,7 +938,6 @@ impl Pal for Sys {
         } as *mut c_void)
     }
 
-    #[expect(unused_variables, reason = "function not yet implemented")]
     unsafe fn mremap(
         addr: *mut c_void,
         len: usize,
@@ -946,7 +945,49 @@ impl Pal for Sys {
         flags: c_int,
         args: *mut c_void,
     ) -> Result<*mut c_void> {
-        Err(Errno(ENOSYS))
+        if len == 0 || new_len == 0 {
+            return Err(Errno(EINVAL));
+        }
+
+        const MREMAP_MAYMOVE: c_int = 1;
+        const MREMAP_FIXED: c_int = 2;
+
+        let Some(old_size) = round_up_to_page_size(len) else {
+            return Err(Errno(ENOMEM));
+        };
+        let Some(new_size) = round_up_to_page_size(new_len) else {
+            return Err(Errno(ENOMEM));
+        };
+
+        // Shrinking: the Redox kernel mremap always moves to a new location,
+        // so we handle shrinking ourselves by unmapping the tail in place.
+        if new_size <= old_size {
+            if new_size < old_size {
+                (unsafe { syscall::funmap(addr as usize + new_size, old_size - new_size) })?;
+            }
+            return Ok(addr);
+        }
+
+        // Growing without MAYMOVE: we can't guarantee in-place growth,
+        // so fail and let the caller fall back to mmap+copy+munmap.
+        if flags & MREMAP_MAYMOVE == 0 && flags & MREMAP_FIXED == 0 {
+            return Err(Errno(ENOMEM));
+        }
+
+        // Prot flags for newly allocated pages — RW covers the heap use case.
+        let prot = (syscall::MapFlags::PROT_READ | syscall::MapFlags::PROT_WRITE).bits();
+
+        let (new_addr, kernel_flags) = if flags & MREMAP_FIXED != 0 {
+            (args as usize, syscall::MremapFlags::FIXED_REPLACE.bits() | prot)
+        } else {
+            (0usize, prot)
+        };
+
+        let result = (unsafe {
+            syscall::syscall5(syscall::SYS_MREMAP, addr as usize, old_size, new_addr, new_size, kernel_flags)
+        })? as *mut c_void;
+
+        Ok(result)
     }
 
     unsafe fn mprotect(addr: *mut c_void, len: usize, prot: c_int) -> Result<()> {
