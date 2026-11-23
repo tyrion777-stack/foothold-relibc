@@ -9,8 +9,10 @@ use crate::{
     header::{bits_safamily_t::sa_family_t, sys_uio::iovec},
     out::Out,
     platform::{
-        PalSocket, Sys,
-        types::{c_char, c_int, c_long, c_uchar, c_uint, c_void, size_t, ssize_t},
+        Pal, PalSocket, Sys,
+        types::{
+            c_char, c_int, c_long, c_uchar, c_uint, c_ulonglong, c_void, size_t, ssize_t,
+        },
     },
 };
 
@@ -205,6 +207,30 @@ pub unsafe extern "C" fn accept(
         address,
         address_len
     )
+}
+
+/// See <https://www.man7.org/linux/man-pages/man2/accept4.2.html>.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn accept4(
+    socket: c_int,
+    address: *mut sockaddr,
+    address_len: *mut socklen_t,
+    flags: c_int,
+) -> c_int {
+    use crate::header::fcntl::{F_GETFL, F_SETFD, F_SETFL, FD_CLOEXEC, O_NONBLOCK};
+
+    let fd = unsafe { accept(socket, address, address_len) };
+    if fd < 0 {
+        return fd;
+    }
+    if flags & constants::SOCK_CLOEXEC != 0 {
+        let _ = Sys::fcntl(fd, F_SETFD, FD_CLOEXEC as c_ulonglong);
+    }
+    if flags & constants::SOCK_NONBLOCK != 0 {
+        let fl = Sys::fcntl(fd, F_GETFL, 0).unwrap_or(0);
+        let _ = Sys::fcntl(fd, F_SETFL, (fl | O_NONBLOCK) as c_ulonglong);
+    }
+    fd
 }
 
 /// See <https://pubs.opengroup.org/onlinepubs/9799919799/functions/bind.html>.
