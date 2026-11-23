@@ -36,17 +36,16 @@ pub const SCHED_RR: c_int = 1;
 pub const SCHED_OTHER: c_int = 2;
 
 /// See <https://pubs.opengroup.org/onlinepubs/9799919799/functions/sched_get_priority_max.html>.
-// #[unsafe(no_mangle)]
-#[expect(unused_variables, reason = "function not yet implemented")]
-pub extern "C" fn sched_get_priority_max(policy: c_int) -> c_int {
-    todo!()
+#[unsafe(no_mangle)]
+pub extern "C" fn sched_get_priority_max(_policy: c_int) -> c_int {
+    // Redox has no priority scheduling; all policies share a single priority level.
+    0
 }
 
-/// See <https://pubs.opengroup.org/onlinepubs/9799919799/functions/sched_get_priority_max.html>.
-// #[unsafe(no_mangle)]
-#[expect(unused_variables, reason = "function not yet implemented")]
-pub extern "C" fn sched_get_priority_min(policy: c_int) -> c_int {
-    todo!()
+/// See <https://pubs.opengroup.org/onlinepubs/9799919799/functions/sched_get_priority_min.html>.
+#[unsafe(no_mangle)]
+pub extern "C" fn sched_get_priority_min(_policy: c_int) -> c_int {
+    0
 }
 
 /// See <https://pubs.opengroup.org/onlinepubs/9799919799/functions/sched_getparam.html>.
