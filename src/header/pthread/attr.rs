@@ -34,8 +34,8 @@ impl Default for RlctAttr {
             guardsize: Sys::getpagesize(),
             // TODO
             stack: 0,
-            // TODO
-            stacksize: 1024 * 1024,
+            // Match Linux's 8 MiB default; 1 MiB is too small for SpiderMonkey/ICU init.
+            stacksize: 8 * 1024 * 1024,
             param: sched_param {
                 // TODO
                 sched_priority: 0,
