@@ -567,7 +567,8 @@ pub unsafe extern "C" fn redox_mmap_v1(
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn redox_munmap_v1(addr: *mut (), unaligned_len: usize) -> RawResult {
-    Error::mux(unsafe { syscall::funmap(addr as usize, unaligned_len) })
+    let len = unaligned_len.next_multiple_of(4096);
+    Error::mux(unsafe { syscall::funmap(addr as usize, len) })
 }
 
 #[unsafe(no_mangle)]
