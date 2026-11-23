@@ -13,6 +13,7 @@ after_includes = """
 #include <bits/safamily-t.h> // for sa_family_t
 #include <bits/socklen-t.h>  // for socklen_t
 #include <bits/ssize-t.h>    // for ssize_t from sys/types.h
+#include <bits/timeval.h>    // for SO_RCVTIMEO and SO_SNDTIMEO values
 
 #if defined(_GNU_SOURCE)
 #include <bits/ucred.h>      // for Non-POSIX ucred struct
