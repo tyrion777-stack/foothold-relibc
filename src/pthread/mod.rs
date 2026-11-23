@@ -45,6 +45,7 @@ pub unsafe fn init() {
         // TODO: set these values on Linux as well
         stack_base,
         stack_size,
+        stack_alloc_base: ptr::null_mut(),
 
         tcb_selfref: UnsafeCell::new(core::ptr::null_mut()),
 
@@ -83,6 +84,8 @@ pub struct Pthread {
 
     pub(crate) stack_base: *mut c_void,
     pub(crate) stack_size: usize,
+    // Start of the mapping including the guard; null when relibc does not own it.
+    pub(crate) stack_alloc_base: *mut c_void,
 
     pub(crate) tcb_selfref: UnsafeCell<*mut Tcb>,
 
@@ -134,13 +137,20 @@ pub(crate) unsafe fn create(
 
     let stack_size = attrs.stacksize.next_multiple_of(Sys::getpagesize());
 
-    let stack_base = if attrs.stack != 0 {
+    let guard_size = if attrs.stack != 0 {
+        0
+    } else {
+        attrs.guardsize.next_multiple_of(Sys::getpagesize())
+    };
+    let alloc_size = guard_size + stack_size;
+
+    let alloc_base = if attrs.stack != 0 {
         attrs.stack as *mut c_void
     } else {
         let ret = unsafe {
             sys_mman::mmap(
                 core::ptr::null_mut(),
-                stack_size,
+                alloc_size,
                 sys_mman::PROT_READ | sys_mman::PROT_WRITE,
                 sys_mman::MAP_PRIVATE | sys_mman::MAP_ANONYMOUS,
                 -1,
@@ -151,8 +161,15 @@ pub(crate) unsafe fn create(
             // "Insufficient resources"
             return Err(Errno(EAGAIN));
         }
+        if guard_size > 0
+            && unsafe { sys_mman::mprotect(ret, guard_size, sys_mman::PROT_NONE) } != 0
+        {
+            let _ = unsafe { sys_mman::munmap(ret, alloc_size) };
+            return Err(Errno(EAGAIN));
+        }
         ret
     };
+    let stack_base = unsafe { alloc_base.cast::<u8>().add(guard_size) }.cast::<c_void>();
 
     let mut flags = PthreadFlags::empty();
     match i32::from(attrs.detachstate) {
@@ -163,13 +180,14 @@ pub(crate) unsafe fn create(
     }
 
     let stack_raii = MmapGuard {
-        page_start: stack_base,
-        mmap_size: stack_size,
+        page_start: alloc_base,
+        mmap_size: alloc_size,
     };
 
     let current_tcb = unsafe { Tcb::current() }.expect("no TCB!");
     let new_tcb = unsafe { Tcb::new(current_tcb.tls_len) }.map_err(|_| Errno(ENOMEM))?;
     new_tcb.pthread.flags = flags.bits().into();
+    new_tcb.pthread.stack_alloc_base = alloc_base;
     new_tcb.pthread.stack_base = stack_base;
     new_tcb.pthread.stack_size = stack_size;
 
@@ -309,8 +327,12 @@ pub unsafe fn exit_current_thread(retval: Retval) -> ! {
     unsafe { header::tls::run_all_destructors() };
 
     let this = current_thread().expect("failed to obtain current thread when exiting");
-    let stack_base = this.stack_base;
-    let stack_size = this.stack_size;
+    let (exit_base, exit_size) = if this.stack_alloc_base.is_null() {
+        (this.stack_base, this.stack_size)
+    } else {
+        let guard_size = this.stack_base as usize - this.stack_alloc_base as usize;
+        (this.stack_alloc_base, guard_size + this.stack_size)
+    };
 
     // dealloc_thread() or waitval.post() might unmaps the tcb so extract the thread_fd now
     #[cfg(target_os = "redox")]
@@ -331,9 +353,9 @@ pub unsafe fn exit_current_thread(retval: Retval) -> ! {
 
     #[cfg(target_os = "redox")]
     unsafe {
-        redox_rt::thread::exit_this_thread_inner(stack_base.cast(), stack_size, status_fd)
+        redox_rt::thread::exit_this_thread_inner(exit_base.cast(), exit_size, status_fd)
     }
-    unsafe { Sys::exit_thread(stack_base.cast(), stack_size) }
+    unsafe { Sys::exit_thread(exit_base.cast(), exit_size) }
 }
 
 unsafe fn dealloc_thread(thread: &Pthread) {
